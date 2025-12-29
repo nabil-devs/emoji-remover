@@ -81,9 +81,6 @@ npm install -g @vscode/vsce
 Package the extension:
 vsce package
 
-Publish to marketplace:
-vsce publish
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
