@@ -29,9 +29,8 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs/promises"));
 const os = __importStar(require("os"));
 function activate(context) {
-    console.log('Emoji Remover extension is now active!');
     const backupDir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
-    fs.mkdir(backupDir, { recursive: true }).catch(console.error);
+    fs.mkdir(backupDir, { recursive: true }).catch(() => { });
     const removeFromFile = vscode.commands.registerCommand('emojiRemover.removeFromFile', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
@@ -39,19 +38,17 @@ function activate(context) {
             return;
         }
         const document = editor.document;
-        const text = document.getText();
-        const cleanedText = removeEmojis(text);
-        if (text === cleanedText) {
+        const original = document.getText();
+        const cleaned = removeEmojisAndSpaces(original);
+        if (original === cleaned) {
             vscode.window.showInformationMessage('No emojis found in the current file.');
             return;
         }
-        await createBackup(document.uri, text);
+        await createBackup(document.uri, original);
         const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(text.length));
-        edit.replace(document.uri, fullRange, cleanedText);
-        const success = await vscode.workspace.applyEdit(edit);
-        if (success) {
-            showCompletionMessage(`Emojis removed from current file. Backup saved.`);
+        edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(original.length)), cleaned);
+        if (await vscode.workspace.applyEdit(edit)) {
+            showCompletionMessage('Emojis removed from current file. Backup saved.');
         }
     });
     const removeFromSelection = vscode.commands.registerCommand('emojiRemover.removeFromSelection', async () => {
@@ -60,161 +57,145 @@ function activate(context) {
             vscode.window.showWarningMessage('No active text editor found.');
             return;
         }
-        const selections = editor.selections;
-        if (selections.length === 0 || selections[0].isEmpty) {
+        if (editor.selections.length === 0 || editor.selections[0].isEmpty) {
             vscode.window.showWarningMessage('Please select some text first.');
             return;
         }
         const document = editor.document;
-        const originalText = document.getText();
+        const fullText = document.getText();
         const edit = new vscode.WorkspaceEdit();
-        let hasChanges = false;
-        for (const selection of selections) {
+        let changed = false;
+        for (const selection of editor.selections) {
             const text = document.getText(selection);
-            const cleanedText = removeEmojis(text);
-            if (text !== cleanedText) {
-                hasChanges = true;
-                edit.replace(document.uri, selection, cleanedText);
+            const cleaned = removeEmojisAndSpaces(text);
+            if (text !== cleaned) {
+                edit.replace(document.uri, selection, cleaned);
+                changed = true;
             }
         }
-        if (!hasChanges) {
+        if (!changed) {
             vscode.window.showInformationMessage('No emojis found in the selection.');
             return;
         }
-        await createBackup(document.uri, originalText);
-        const success = await vscode.workspace.applyEdit(edit);
-        if (success) {
-            showCompletionMessage(`Emojis removed from selection. Backup saved.`);
+        await createBackup(document.uri, fullText);
+        if (await vscode.workspace.applyEdit(edit)) {
+            showCompletionMessage('Emojis removed from selection. Backup saved.');
         }
     });
     const removeFromWorkspace = vscode.commands.registerCommand('emojiRemover.removeFromWorkspace', async () => {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders) {
             vscode.window.showWarningMessage('No workspace folder open.');
             return;
         }
         const config = vscode.workspace.getConfiguration('emojiRemover');
-        const includePatterns = config.get('filePatterns', ['**/*']);
-        const excludePatterns = config.get('excludePatterns', ['**/node_modules/**', '**/.git/**']);
-        const userChoice = await vscode.window.showWarningMessage('This will remove emojis from all matching files in the workspace. Backups will be created. Continue?', { modal: true }, 'Yes', 'No', 'Show Backup Location');
-        if (userChoice === 'Show Backup Location') {
-            await showBackupLocation();
+        const includes = config.get('filePatterns', ['**/*']);
+        const excludes = config.get('excludePatterns', ['**/node_modules/**', '**/.git/**']);
+        const choice = await vscode.window.showWarningMessage('This will remove emojis from all matching files in the workspace. Backups will be created. Continue?', { modal: true }, 'Yes', 'No');
+        if (choice !== 'Yes')
             return;
-        }
-        if (userChoice !== 'Yes') {
-            return;
-        }
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "Removing emojis from workspace...",
+            title: 'Removing emojis from workspace...',
             cancellable: false
         }, async (progress) => {
-            let totalFiles = 0;
-            let processedFiles = 0;
-            let modifiedFiles = 0;
-            let backupFiles = [];
-            const files = [];
-            for (const folder of workspaceFolders) {
-                for (const pattern of includePatterns) {
-                    const found = await vscode.workspace.findFiles(pattern, `{${excludePatterns.join(',')}}`);
-                    files.push(...found);
+            const uris = [];
+            for (const folder of folders) {
+                for (const pattern of includes) {
+                    const found = await vscode.workspace.findFiles(pattern, `{${excludes.join(',')}}`);
+                    uris.push(...found);
                 }
             }
-            const uniqueFiles = Array.from(new Set(files.map(f => f.fsPath))).map(f => vscode.Uri.file(f));
-            totalFiles = uniqueFiles.length;
-            for (const fileUri of uniqueFiles) {
+            const files = Array.from(new Set(uris.map(u => u.fsPath))).map(p => vscode.Uri.file(p));
+            let processed = 0;
+            let modified = 0;
+            for (const uri of files) {
                 progress.report({
-                    message: `Processing ${path.basename(fileUri.fsPath)} (${processedFiles + 1}/${totalFiles})`,
-                    increment: (100 / totalFiles)
+                    message: `Processing ${path.basename(uri.fsPath)} (${processed + 1}/${files.length})`,
+                    increment: 100 / files.length
                 });
                 try {
-                    const content = await fs.readFile(fileUri.fsPath, 'utf8');
-                    const cleanedContent = removeEmojis(content);
-                    if (content !== cleanedContent) {
-                        const backupPath = await createBackup(fileUri, content);
-                        if (backupPath) {
-                            backupFiles.push(backupPath);
-                        }
-                        await fs.writeFile(fileUri.fsPath, cleanedContent, 'utf8');
-                        modifiedFiles++;
+                    const content = await fs.readFile(uri.fsPath, 'utf8');
+                    const cleaned = removeEmojisAndSpaces(content);
+                    if (content !== cleaned) {
+                        await createBackup(uri, content);
+                        await fs.writeFile(uri.fsPath, cleaned, 'utf8');
+                        modified++;
                     }
                 }
-                catch (error) {
-                    console.error(`Error processing ${fileUri.fsPath}:`, error);
-                }
-                processedFiles++;
+                catch { }
+                processed++;
             }
-            showCompletionMessage(`Processed ${totalFiles} files. Removed emojis from ${modifiedFiles} files. ${backupFiles.length} backups created.`);
+            showCompletionMessage(`Processed ${files.length} files. Modified ${modified} files.`);
         });
     });
-    const showBackupCommand = vscode.commands.registerCommand('emojiRemover.showBackupLocation', async () => {
-        await showBackupLocation();
-    });
-    const restoreBackupCommand = vscode.commands.registerCommand('emojiRemover.restoreFromBackup', async () => {
-        await restoreFromBackup();
-    });
-    const starRepoCommand = vscode.commands.registerCommand('emojiRemover.starRepo', async () => {
-        const repoUrl = 'https://github.com/nabil-devs/emoji-remover';
-        vscode.env.openExternal(vscode.Uri.parse(repoUrl));
-    });
-    context.subscriptions.push(removeFromFile, removeFromSelection, removeFromWorkspace, showBackupCommand, restoreBackupCommand, starRepoCommand);
+    context.subscriptions.push(removeFromFile, removeFromSelection, removeFromWorkspace, vscode.commands.registerCommand('emojiRemover.showBackupLocation', showBackupLocation), vscode.commands.registerCommand('emojiRemover.restoreFromBackup', restoreFromBackup));
 }
 exports.activate = activate;
 function deactivate() { }
 exports.deactivate = deactivate;
-function removeEmojis(text) {
+function removeEmojisAndSpaces(text) {
     const config = vscode.workspace.getConfiguration('emojiRemover');
-    const customRegex = config.get('emojiRegex');
-    let regexPattern;
-    if (customRegex) {
+    const custom = config.get('emojiRegex');
+    let source;
+    if (custom) {
         try {
-            regexPattern = new RegExp(customRegex, 'gu');
+            new RegExp(custom, 'u');
+            source = custom;
         }
-        catch (error) {
-            console.error('Invalid custom regex, using default:', error);
-            regexPattern = getDefaultEmojiRegex();
+        catch {
+            source = defaultEmojiSource();
         }
     }
     else {
-        regexPattern = getDefaultEmojiRegex();
+        source = defaultEmojiSource();
     }
-    return text.replace(regexPattern, '');
+    const regex = new RegExp(`(${source})`, 'gu');
+    return text
+        .replace(regex, (_m, _e, offset, full) => {
+        const before = full[offset - 1];
+        const after = full[offset + _m.length];
+        if (before && after && /\w/.test(before) && /\w/.test(after)) {
+            return ' ';
+        }
+        if (before === ' ')
+            return '';
+        if (after === ' ')
+            return '';
+        return '';
+    })
+        .replace(/[\uFE0E\uFE0F]/g, '')
+        .replace(/ {2,}/g, ' ')
+        .replace(/[ \t]+$/gm, '');
 }
-function getDefaultEmojiRegex() {
-    return new RegExp(/[\u{1F300}-\u{1F9FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{1F300}-\u{1F5FF}]/gu);
+function defaultEmojiSource() {
+    return [
+        '[\\u{1F300}-\\u{1FAFF}]',
+        '[\\u{2600}-\\u{27BF}]',
+        '[\\u{1F1E6}-\\u{1F1FF}]'
+    ].join('|');
 }
-async function createBackup(fileUri, originalContent) {
+async function createBackup(uri, content) {
     try {
-        const backupDir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
-        await fs.mkdir(backupDir, { recursive: true });
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const fileName = path.basename(fileUri.fsPath);
-        const backupFileName = `${timestamp}_${fileName}.backup`;
-        const backupPath = path.join(backupDir, backupFileName);
-        await fs.writeFile(backupPath, originalContent, 'utf8');
-        return backupPath;
+        const dir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
+        await fs.mkdir(dir, { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const name = `${ts}_${path.basename(uri.fsPath)}.backup`;
+        const full = path.join(dir, name);
+        await fs.writeFile(full, content, 'utf8');
+        return full;
     }
-    catch (error) {
-        console.error('Failed to create backup:', error);
+    catch {
         return null;
     }
 }
 async function showBackupLocation() {
-    const backupDir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
+    const dir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
     try {
-        await fs.access(backupDir);
-        const choice = await vscode.window.showInformationMessage(`Backups are stored in: ${backupDir}`, 'Open Folder', 'List Backups');
+        await fs.access(dir);
+        const choice = await vscode.window.showInformationMessage(`Backups are stored in: ${dir}`, 'Open Folder');
         if (choice === 'Open Folder') {
-            vscode.env.openExternal(vscode.Uri.file(backupDir));
-        }
-        else if (choice === 'List Backups') {
-            const files = await fs.readdir(backupDir);
-            if (files.length === 0) {
-                vscode.window.showInformationMessage('No backups found.');
-            }
-            else {
-                vscode.window.showInformationMessage(`Found ${files.length} backup files in ${backupDir}`);
-            }
+            vscode.env.openExternal(vscode.Uri.file(dir));
         }
     }
     catch {
@@ -222,57 +203,45 @@ async function showBackupLocation() {
     }
 }
 async function restoreFromBackup() {
-    const backupDir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
+    const dir = path.join(os.tmpdir(), 'vscode-emoji-remover-backups');
     try {
-        await fs.access(backupDir);
-        const files = await fs.readdir(backupDir);
+        await fs.access(dir);
+        const files = await fs.readdir(dir);
         if (files.length === 0) {
             vscode.window.showInformationMessage('No backup files found.');
             return;
         }
-        const items = files.map(file => ({
-            label: file,
-            description: path.join(backupDir, file),
-            backupPath: path.join(backupDir, file)
-        }));
-        const selected = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Select a backup file to restore'
-        });
-        if (!selected) {
+        const selected = await vscode.window.showQuickPick(files);
+        if (!selected)
             return;
-        }
-        const backupContent = await fs.readFile(selected.backupPath, 'utf8');
-        const originalName = selected.label.replace(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_/, '').replace(/\.backup$/, '');
+        const content = await fs.readFile(path.join(dir, selected), 'utf8');
+        const original = selected.replace(/^[^_]+_/, '').replace(/\.backup$/, '');
         const saveUri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(originalName),
-            filters: {
-                'All Files': ['*']
-            }
+            defaultUri: vscode.Uri.file(original)
         });
         if (saveUri) {
-            await fs.writeFile(saveUri.fsPath, backupContent, 'utf8');
+            await fs.writeFile(saveUri.fsPath, content, 'utf8');
             vscode.window.showInformationMessage(`Backup restored to: ${saveUri.fsPath}`);
         }
     }
-    catch (error) {
-        vscode.window.showErrorMessage(`Failed to restore backup: ${error}`);
+    catch {
+        vscode.window.showErrorMessage('Failed to restore backup.');
     }
 }
 function showCompletionMessage(message) {
     const config = vscode.workspace.getConfiguration('emojiRemover');
-    const showStarRequest = config.get('showStarRequest', true);
-    if (showStarRequest) {
-        vscode.window.showInformationMessage(`${message} If you find this extension helpful, please consider starring the repository!`, '⭐ Star on GitHub', 'Don\'t Show Again').then(selection => {
-            if (selection === '⭐ Star on GitHub') {
-                vscode.env.openExternal(vscode.Uri.parse('https://github.com/nabil-devs/emoji-remover'));
-            }
-            else if (selection === 'Don\'t Show Again') {
-                config.update('showStarRequest', false, vscode.ConfigurationTarget.Global);
-            }
-        });
-    }
-    else {
+    const showStar = config.get('showStarRequest', true);
+    if (!showStar) {
         vscode.window.showInformationMessage(message);
+        return;
     }
+    vscode.window.showInformationMessage(`${message} If you find this extension helpful, please consider starring the repository!`, '⭐ Star on GitHub', 'Don\'t Show Again').then(choice => {
+        if (choice === '⭐ Star on GitHub') {
+            vscode.env.openExternal(vscode.Uri.parse('https://github.com/nabil-devs/emoji-remover'));
+        }
+        if (choice === 'Don\'t Show Again') {
+            config.update('showStarRequest', false, vscode.ConfigurationTarget.Global);
+        }
+    });
 }
 //# sourceMappingURL=extension.js.map
