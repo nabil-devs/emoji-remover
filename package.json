@@ -1,0 +1,124 @@
+{
+  "name": "emoji-remover",
+  "displayName": "Emoji Remover",
+  "description": "Remove Unicode emojis from files with backup support",
+  "version": "1.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nabil-devs/emoji-remover.git"
+  },
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Formatters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:emojiRemover.removeFromFile",
+    "onCommand:emojiRemover.removeFromSelection",
+    "onCommand:emojiRemover.removeFromWorkspace",
+    "onCommand:emojiRemover.showBackupLocation",
+    "onCommand:emojiRemover.restoreFromBackup",
+    "onCommand:emojiRemover.starRepo"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "emojiRemover.removeFromFile",
+        "title": "Remove Emojis: Current File"
+      },
+      {
+        "command": "emojiRemover.removeFromSelection",
+        "title": "Remove Emojis: From Selection"
+      },
+      {
+        "command": "emojiRemover.removeFromWorkspace",
+        "title": "Remove Emojis: From Workspace (Filtered)"
+      },
+      {
+        "command": "emojiRemover.showBackupLocation",
+        "title": "Emoji Remover: Show Backup Location"
+      },
+      {
+        "command": "emojiRemover.restoreFromBackup",
+        "title": "Emoji Remover: Restore from Backup"
+      },
+      {
+        "command": "emojiRemover.starRepo",
+        "title": "Emoji Remover: ⭐ Star Repository"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "emojiRemover.removeFromSelection",
+          "group": "1_modification"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "emojiRemover.removeFromFile"
+        },
+        {
+          "command": "emojiRemover.removeFromSelection"
+        },
+        {
+          "command": "emojiRemover.removeFromWorkspace"
+        },
+        {
+          "command": "emojiRemover.showBackupLocation"
+        },
+        {
+          "command": "emojiRemover.restoreFromBackup"
+        },
+        {
+          "command": "emojiRemover.starRepo"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Emoji Remover",
+      "properties": {
+        "emojiRemover.filePatterns": {
+          "type": "array",
+          "default": ["**/*.txt", "**/*.md", "**/*.json"],
+          "description": "File patterns to include when processing workspace"
+        },
+        "emojiRemover.excludePatterns": {
+          "type": "array",
+          "default": ["**/node_modules/**", "**/.git/**"],
+          "description": "Patterns to exclude from workspace processing"
+        },
+        "emojiRemover.emojiRegex": {
+          "type": "string",
+          "default": "[\\u{1F300}-\\u{1F9FF}\\u{1F1E0}-\\u{1F1FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}\\u{1F900}-\\u{1F9FF}\\u{1F018}-\\u{1F270}\\u{1F300}-\\u{1F5FF}]",
+          "description": "Custom regex for matching emojis"
+        },
+        "emojiRemover.showStarRequest": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show star request after successful operations"
+        },
+        "emojiRemover.backupLocation": {
+          "type": "string",
+          "default": "${tmp}/vscode-emoji-remover-backups",
+          "description": "Custom backup location (supports ${tmp}, ${home} variables)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^16.11.7",
+    "@types/vscode": "^1.60.0",
+    "typescript": "^4.9.4"
+  }
+}
