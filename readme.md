@@ -20,27 +20,6 @@ Remove Unicode emojis from your files with automatic backup support.
    - "Remove Emojis: From Selection" - Clean selected text
    - "Remove Emojis: From Workspace" - Batch clean multiple files
 
-## Configuration
-
-Add to your settings.json:
-
-{
-  "emojiRemover.filePatterns": [
-    "**/*.txt",
-    "**/*.md",
-    "**/*.json",
-    "**/*.ts",
-    "**/*.js"
-  ],
-  "emojiRemover.excludePatterns": [
-    "**/node_modules/**",
-    "**/.git/**",
-    "**/dist/**"
-  ],
-  "emojiRemover.emojiRegex": "[\\u{1F300}-\\u{1F9FF}]",
-  "emojiRemover.showStarRequest": true,
-  "emojiRemover.backupLocation": "${tmp}/vscode-emoji-remover-backups"
-}
 
 ## Backup System
 
