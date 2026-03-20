@@ -9,7 +9,7 @@ Remove Unicode emojis from your files with automatic backup support.
 - **Remove from workspace**: Batch process files with filtering options
 - **Automatic backups**: Every operation creates a timestamped backup
 - **Restore functionality**: Restore any file from backup
-- **Safe operations**: Never lose your original content
+- **Safe operations**: Never lose your original content 
 
 ## Quick Start
 
